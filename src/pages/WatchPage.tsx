@@ -234,6 +234,28 @@ export function WatchPage() {
 
                 {/* Visual Indicators for available channels & Quality */}
                 <div className="flex items-center gap-4 text-xs text-slate-500">
+                    {/* Cast Button */}
+                    <button
+                        onClick={async () => {
+                            if (videoRef.current && (videoRef.current as any).remote) {
+                                try {
+                                    await (videoRef.current as any).remote.prompt();
+                                } catch (e) {
+                                    toast.error("Casting not supported in this browser.");
+                                }
+                            } else {
+                                toast.error("Casting is not available.");
+                            }
+                        }}
+                        className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white transition-colors"
+                    >
+                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M2 16.1A5 5 0 0 1 5.9 20M2 12.05A9 9 0 0 1 9.95 20M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6" />
+                            <line x1="2" y1="20" x2="2.01" y2="20" />
+                        </svg>
+                        <span className="hidden sm:inline">Cast to TV</span>
+                    </button>
+
                     {qualityLevels.length > 0 && (
                         <div className="flex items-center gap-2">
                             <span className="text-white font-medium hidden sm:inline">Quality:</span>

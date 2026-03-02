@@ -173,6 +173,10 @@ app.all('/proxy', async (req, res) => {
             'Referer': isJio ? 'https://www.jiocinema.com/' : `${urlObj.protocol}//${urlObj.host}/`,
             'Origin': isJio ? 'https://www.jiocinema.com' : `${urlObj.protocol}//${urlObj.host}`,
             'Accept': '*/*',
+            'Accept-Encoding': 'identity',
+            'Connection': 'keep-alive',
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache'
         };
 
         if (req.headers['content-type']) headers['Content-Type'] = req.headers['content-type'];
@@ -215,7 +219,13 @@ app.all('/proxy', async (req, res) => {
             let playlistData = '';
             response.data.on('data', (chunk) => { playlistData += chunk.toString(); });
             response.data.on('end', () => {
+                if (!playlistData || playlistData.trim().length === 0) {
+                    console.error(`[Proxy] Empty response from upstream: ${streamUrl}`);
+                    return res.status(502).send('Upstream returned an empty manifest. The source may be restricted or offline.');
+                }
+
                 if (playlistData.trim().startsWith('<!DOCTYPE') || playlistData.trim().startsWith('<html')) {
+                    console.error(`[Proxy] Upstream returned HTML instead of M3U8: ${streamUrl}`);
                     return res.status(404).send('Stream source returned an error page.');
                 }
 
@@ -253,6 +263,10 @@ app.all('/proxy', async (req, res) => {
                     }
                 });
                 res.send(rewrittenLines.join('\n'));
+            });
+            response.data.on('error', (err) => {
+                console.error(`[Proxy] Stream Error: ${err.message}`);
+                if (!res.headersSent) res.status(502).send('Error reading upstream stream');
             });
             return;
         }
