@@ -8,7 +8,11 @@ import compression from 'compression';
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-app.use(cors());
+app.use(cors({
+    origin: '*',
+    exposedHeaders: ['Content-Length', 'Content-Range'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Range']
+}));
 
 // Trust proxy for correct protocol detection on Railway
 app.set('trust proxy', true);
@@ -23,30 +27,34 @@ app.use(express.static(path.join(__dirname, 'dist')));
 // --- JioTV Backend Logic ---
 const DATA_FOLDER = path.join(__dirname, 'assets', 'data');
 
-function decrypt(eData, keyStr) {
-    const key = parseInt(keyStr);
-    const encrypted = Buffer.from(eData, 'base64');
-    const decrypted = [];
-    for (let i = 0; i < encrypted.length; i++) {
-        // Equivalent to PHP's chr(ord($char) - $key)
-        decrypted.push(String.fromCharCode((encrypted[i] - key) & 0xFF));
-    }
-    return decrypted.join('');
-}
-
 function getJioCredentials() {
     try {
         const credsFile = path.join(DATA_FOLDER, 'creds.jtv');
-        const keyFile = path.join(DATA_FOLDER, 'credskey.jtv');
-
-        if (!fs.existsSync(credsFile) || !fs.existsSync(keyFile)) return null;
+        if (!fs.existsSync(credsFile)) {
+            console.error("Missing credentials file:", credsFile);
+            return null;
+        }
 
         const eData = fs.readFileSync(credsFile, 'utf8');
-        const keyB64 = fs.readFileSync(keyFile, 'utf8').trim();
-        const key = Buffer.from(keyB64, 'base64').toString('utf8');
+        // Based on investigation, the file is either plain JSON or Base64 of JSON.
+        // PHP's decrypt_data with a string key that starts with letters results in a key of 0.
+        let rawData = eData;
+        try {
+            // Try base64 decode first
+            rawData = Buffer.from(eData, 'base64').toString('utf8');
+            console.log("Attempted Base64 decode for creds.jtv");
+        } catch (e) {
+            console.log("creds.jtv not Base64 encoded, trying as plain text. Error:", e.message);
+        }
 
-        const decrypted = decrypt(eData, key);
-        return JSON.parse(decrypted);
+        // If it starts with {, it's JSON
+        if (rawData.trim().startsWith('{')) {
+            console.log("creds.jtv successfully parsed as JSON.");
+            return JSON.parse(rawData);
+        }
+
+        console.error("creds.jtv content is not valid JSON after decoding attempt.");
+        return null;
     } catch (e) {
         console.error("Error loading Jio credentials:", e);
         return null;
@@ -86,7 +94,9 @@ async function getJioStreamUrl(id) {
         "usergroup": "tvYR7NSNn7rymo3F",
         "User-Agent": "plaYtv/7.1.3 (Linux;Android 14) ExoPlayerLib/2.11.7",
         "versionCode": "452",
-        "Content-Type": "application/x-www-form-urlencoded"
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Origin": "https://www.jiocinema.com",
+        "Referer": "https://www.jiocinema.com/"
     };
 
     const res = await axios.post("https://jiotvapi.media.jio.com/playback/apis/v1/geturl?langId=6", postData, { headers });
@@ -153,18 +163,19 @@ app.all('/proxy', async (req, res) => {
         const baseUrl = `${protocol}://${host}`;
 
         // Forward headers: JioTV requires a specific UA and often tokens in headers
-        const userAgent = streamUrl.includes('jio')
+        const userAgent = (streamUrl.includes('jio') || streamUrl.includes('akamaized.net'))
             ? 'plaYtv/7.1.3 (Linux;Android 14) ExoPlayerLib/2.11.7'
             : (req.headers['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36');
 
         const headers = {
             'User-Agent': userAgent,
-            'Referer': `${urlObj.protocol}//${urlObj.host}/`,
-            'Origin': `${urlObj.protocol}//${urlObj.host}`,
+            'Referer': streamUrl.includes('jio') ? 'https://www.jiocinema.com/' : `${urlObj.protocol}//${urlObj.host}/`,
+            'Origin': streamUrl.includes('jio') ? 'https://www.jiocinema.com' : `${urlObj.protocol}//${urlObj.host}`,
             'Accept': '*/*',
         };
 
         if (req.headers['content-type']) headers['Content-Type'] = req.headers['content-type'];
+        if (req.headers['range']) headers['Range'] = req.headers['range'];
 
         const config = {
             method: req.method,

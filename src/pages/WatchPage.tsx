@@ -77,8 +77,14 @@ export function WatchPage() {
         let shakaPlayer: shaka.Player | null = null;
 
         const initPlayer = async () => {
-            // Apply proxy
-            const proxyUrl = `http://localhost:8080/proxy?url=${encodeURIComponent(streamUrl)}`;
+            // Apply proxy only for external URLs
+            let proxyUrl = streamUrl;
+            if (streamUrl.startsWith('http') && !streamUrl.includes(window.location.host)) {
+                proxyUrl = `/proxy?url=${encodeURIComponent(streamUrl)}`;
+            } else if (!streamUrl.startsWith('http') && !streamUrl.startsWith('/')) {
+                // Fallback for relative paths that don't start with /
+                proxyUrl = `/${streamUrl}`;
+            }
 
             // Check if DRM is needed
             const hasDrm = !!currentChannel?.drmInfo?.licenseUrl;
@@ -110,7 +116,7 @@ export function WatchPage() {
                     shakaPlayer.getNetworkingEngine()?.registerRequestFilter((type, request) => {
                         if (type === shaka.net.NetworkingEngine.RequestType.LICENSE && request.uris[0].startsWith('http')) {
                             const originalUri = request.uris[0];
-                            request.uris[0] = `http://localhost:8080/proxy?url=${encodeURIComponent(originalUri)}`;
+                            request.uris[0] = `/proxy?url=${encodeURIComponent(originalUri)}`;
                         }
                     });
 
