@@ -120,7 +120,7 @@ app.all('/proxy', async (req, res) => {
 });
 
 // Handle React Router, return all requests to React app
-app.get('*', (req, res) => {
+app.get('/(.*)?', (req, res) => {
     // Exclude the /proxy path from this fallback just in case
     if (!req.path.startsWith('/proxy')) {
         res.sendFile(path.join(__dirname, 'dist', 'index.html'));
