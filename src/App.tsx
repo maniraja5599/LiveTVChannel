@@ -8,16 +8,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { Toaster } from 'react-hot-toast';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { user, isLoading } = useAuth();
-
-  if (isLoading) {
-    return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-rose-500">Loading...</div>;
-  }
-
-  if (!user?.isLoggedIn) {
-    return <Navigate to="/login" replace />;
-  }
-
+  // Bypassing login completely
   return <>{children}</>;
 }
 
