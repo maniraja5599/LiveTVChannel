@@ -3,7 +3,7 @@ import { Outlet, useNavigate, useLocation, useOutletContext } from 'react-router
 import { Search, Settings } from 'lucide-react';
 import { fetchAndParseM3U, type Channel } from '../lib/m3uParser';
 
-const DEFAULT_PLAYLIST = 'http://localhost:8000/app/playlist.php';
+const DEFAULT_PLAYLIST = '/api/playlist';
 
 export type AppContextType = {
     search: string;
