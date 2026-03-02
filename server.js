@@ -8,6 +8,10 @@ const PORT = process.env.PORT || 8080;
 
 app.use(cors());
 
+// Serve static files from the React app (Vite 'dist' folder)
+const __dirname = path.resolve();
+app.use(express.static(path.join(__dirname, 'dist')));
+
 // A generic proxy endpoint that fetches the URL and passes headers
 app.all('/proxy', async (req, res) => {
     const streamUrl = req.query.url;
@@ -112,6 +116,16 @@ app.all('/proxy', async (req, res) => {
     } catch (error) {
         console.error("[Proxy] Critical Error:", error.message);
         res.status(500).send('Proxy error: ' + error.message);
+    }
+});
+
+// Handle React Router, return all requests to React app
+app.get('*', (req, res) => {
+    // Exclude the /proxy path from this fallback just in case
+    if (!req.path.startsWith('/proxy')) {
+        res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+    } else {
+        res.status(404).send('Not found');
     }
 });
 
