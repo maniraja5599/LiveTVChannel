@@ -60,22 +60,6 @@ function detectLanguage(id: string, name: string, category: string): string | un
 
 export async function fetchAndParseM3U(url: string): Promise<Channel[]> {
     try {
-        let langMap = new Map<string, string>();
-        try {
-            // Fetch iptv-org channels repository to lookup missing language data from M3U
-            const chRes = await fetch('https://iptv-org.github.io/api/channels.json');
-            if (chRes.ok) {
-                const metadata = await chRes.json();
-                metadata.forEach((c: any) => {
-                    if (c.languages && c.languages.length > 0) {
-                        langMap.set(c.id, LANG_MAP[c.languages[0]] || c.languages[0]);
-                    }
-                });
-            }
-        } catch (e) {
-            console.warn("Could not fetch extended channel metadata", e);
-        }
-
         const response = await fetch(url);
         if (!response.ok) throw new Error('Failed to fetch playlist');
         const text = await response.text();
@@ -89,21 +73,16 @@ export async function fetchAndParseM3U(url: string): Promise<Channel[]> {
             const line = lines[i].trim();
 
             if (line.startsWith('#EXTINF:')) {
-                // Parse metadata
-                // Example: #EXTINF:-1 tvg-id="10TV.in" tvg-logo="https://i.imgur.com/logo.png" group-title="News",10 TV
-
                 const logoMatch = line.match(/tvg-logo="([^"]+)"/);
                 const groupMatch = line.match(/group-title="([^"]+)"/);
                 const idMatch = line.match(/tvg-id="([^"]+)"/);
+                const langMatch = line.match(/tvg-language="([^"]+)"/);
 
-                // Extract name which comes after the last comma
                 const nameParts = line.split(',');
                 const name = nameParts.length > 1 ? nameParts[nameParts.length - 1].trim() : 'Unknown Channel';
 
                 const internalId = idMatch ? idMatch[1] : Math.random().toString(36).substring(7);
-                const baseId = idMatch ? idMatch[1].replace(/@.*$/, '') : '';
-                const explicitLang = idMatch ? langMap.get(baseId) || langMap.get(idMatch[1]) : undefined;
-                const inferredLang = explicitLang || detectLanguage(idMatch ? idMatch[1] : '', name, groupMatch ? groupMatch[1] : '');
+                const inferredLang = langMatch ? langMatch[1] : detectLanguage(idMatch ? idMatch[1] : '', name, groupMatch ? groupMatch[1] : '');
 
                 currentChannel = {
                     id: internalId,

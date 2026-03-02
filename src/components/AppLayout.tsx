@@ -46,8 +46,11 @@ export function AppLayout() {
     useEffect(() => {
         async function loadChannels() {
             setLoading(true);
-            const data = await fetchAndParseM3U(playlistUrl);
-            const filtered = data.filter(c => c.url.includes('.m3u8') || c.url.includes('.ts'));
+            const fetchUrl = playlistUrl.startsWith('http')
+                ? playlistUrl
+                : `${window.location.origin}${playlistUrl.startsWith('/') ? '' : '/'}${playlistUrl}`;
+            const data = await fetchAndParseM3U(fetchUrl);
+            const filtered = data.filter(c => c.url.includes('.m3u8') || c.url.includes('.ts') || c.url.includes('/api/live'));
             setChannels(filtered);
             setLoading(false);
         }

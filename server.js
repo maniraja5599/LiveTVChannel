@@ -10,6 +10,9 @@ const PORT = process.env.PORT || 8080;
 
 app.use(cors());
 
+// Trust proxy for correct protocol detection on Railway
+app.set('trust proxy', true);
+
 // Compress all HTTP responses before they are sent to the client
 app.use(compression());
 
@@ -97,6 +100,10 @@ async function getJioStreamUrl(id) {
 // API: Get the Playlist (M3U)
 app.get('/api/playlist', async (req, res) => {
     try {
+        const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+        const host = req.headers.host;
+        const baseUrl = `${protocol}://${host}`;
+
         const playlistUrl = "https://mitthu786.github.io/tvepg/jiotv/jiodata.json";
         const response = await axios.get(playlistUrl);
         const channels = response.data;
@@ -104,8 +111,8 @@ app.get('/api/playlist', async (req, res) => {
         let m3u = '#EXTM3U x-tvg-url="https://avkb.short.gy/jioepg.xml.gz"\n';
 
         channels.forEach(ch => {
-            const streamUrl = `http://localhost:${PORT}/api/live/${ch.channel_id}`;
-            m3u += `#EXTINF:-1 tvg-id="${ch.channel_id}" tvg-name="${ch.channel_name}" group-title="${ch.channelCategoryId}" tvg-logo="${ch.logoUrl}",${ch.channel_name}\n`;
+            const streamUrl = `${baseUrl}/api/live/${ch.channel_id}`;
+            m3u += `#EXTINF:-1 tvg-id="${ch.channel_id}" tvg-name="${ch.channel_name}" group-title="${ch.channelCategoryId}" tvg-language="${ch.channelLanguageId || ''}" tvg-logo="${ch.logoUrl}",${ch.channel_name}\n`;
             m3u += `${streamUrl}\n\n`;
         });
 
