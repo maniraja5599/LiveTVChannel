@@ -8,4 +8,14 @@ export default defineConfig({
     tailwindcss(),
     react()
   ],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom', 'react-router-dom', 'lucide-react', 'axios', 'react-hot-toast'],
+          player: ['hls.js', 'shaka-player']
+        }
+      }
+    }
+  }
 })

@@ -2,11 +2,15 @@ import express from 'express';
 import cors from 'cors';
 import axios from 'axios';
 import path from 'path';
+import compression from 'compression';
 
 const app = express();
 const PORT = process.env.PORT || 8080;
 
 app.use(cors());
+
+// Compress all HTTP responses before they are sent to the client
+app.use(compression());
 
 // Serve static files from the React app (Vite 'dist' folder)
 const __dirname = path.resolve();
