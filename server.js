@@ -163,14 +163,15 @@ app.all('/proxy', async (req, res) => {
         const baseUrl = `${protocol}://${host}`;
 
         // Forward headers: JioTV requires a specific UA and often tokens in headers
-        const userAgent = (streamUrl.includes('jio') || streamUrl.includes('akamaized.net'))
+        const isJio = streamUrl.includes('jio') || streamUrl.includes('akamaized.net') || streamUrl.includes('media.jio.com');
+        const userAgent = isJio
             ? 'plaYtv/7.1.3 (Linux;Android 14) ExoPlayerLib/2.11.7'
             : (req.headers['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36');
 
         const headers = {
             'User-Agent': userAgent,
-            'Referer': streamUrl.includes('jio') ? 'https://www.jiocinema.com/' : `${urlObj.protocol}//${urlObj.host}/`,
-            'Origin': streamUrl.includes('jio') ? 'https://www.jiocinema.com' : `${urlObj.protocol}//${urlObj.host}`,
+            'Referer': isJio ? 'https://www.jiocinema.com/' : `${urlObj.protocol}//${urlObj.host}/`,
+            'Origin': isJio ? 'https://www.jiocinema.com' : `${urlObj.protocol}//${urlObj.host}`,
             'Accept': '*/*',
         };
 
@@ -190,13 +191,27 @@ app.all('/proxy', async (req, res) => {
 
         const response = await axios(config);
 
+        console.log(`[Proxy] Upstream: ${streamUrl.substring(0, 100)}... Status: ${response.status}`);
+
+        // Handling M3U8 Playlist (only for GET)
+        const isM3U8 = req.method === 'GET' && (streamUrl.includes('.m3u8') || streamUrl.includes('.m3u'));
+
         // Copy over relevant headers
         if (response.headers['content-type']) {
             res.setHeader('Content-Type', response.headers['content-type']);
         }
 
-        // Handling M3U8 Playlist (only for GET)
-        if (req.method === 'GET' && (streamUrl.includes('.m3u8') || streamUrl.includes('.m3u'))) {
+        // Only forward length/ranges for non-m3u8 (segments) as we rewrite m3u8
+        if (!isM3U8) {
+            if (response.headers['content-length']) {
+                res.setHeader('Content-Length', response.headers['content-length']);
+            }
+            if (response.headers['accept-ranges']) {
+                res.setHeader('Accept-Ranges', response.headers['accept-ranges']);
+            }
+        }
+
+        if (isM3U8) {
             let playlistData = '';
             response.data.on('data', (chunk) => { playlistData += chunk.toString(); });
             response.data.on('end', () => {
@@ -207,14 +222,35 @@ app.all('/proxy', async (req, res) => {
                 const lines = playlistData.split('\n');
                 const rewrittenLines = lines.map(line => {
                     const trimmed = line.trim();
-                    if (trimmed && !trimmed.startsWith('#')) {
-                        const resolvedUrl = new URL(trimmed, streamUrl).href;
-                        return `${baseUrl}/proxy?url=${encodeURIComponent(resolvedUrl)}`;
+                    if (!trimmed) return line;
+
+                    if (trimmed.startsWith('#')) {
+                        // Handle URI attributes in tags like #EXT-X-KEY or #EXT-X-MAP
+                        return line.replace(/URI="([^"]+)"/g, (match, subUrl) => {
+                            try {
+                                const resolvedUrl = new URL(subUrl, streamUrl);
+                                // Persist query params if missing
+                                if (urlObj.search && !resolvedUrl.search) {
+                                    resolvedUrl.search = urlObj.search;
+                                }
+                                return `URI="${baseUrl}/proxy?url=${encodeURIComponent(resolvedUrl.href)}"`;
+                            } catch (e) {
+                                return match;
+                            }
+                        });
+                    } else {
+                        // Handle actual segment/manifest URLs
+                        try {
+                            const resolvedUrl = new URL(trimmed, streamUrl);
+                            // Persist query params (tokens like __hdnea) from the parent URL if child lacks them
+                            if (urlObj.search && !resolvedUrl.search) {
+                                resolvedUrl.search = urlObj.search;
+                            }
+                            return `${baseUrl}/proxy?url=${encodeURIComponent(resolvedUrl.href)}`;
+                        } catch (e) {
+                            return line;
+                        }
                     }
-                    return line.replace(/URI="([^"]+)"/g, (match, subUrl) => {
-                        const resolvedUrl = new URL(subUrl, streamUrl).href;
-                        return `URI="${baseUrl}/proxy?url=${encodeURIComponent(resolvedUrl)}"`;
-                    });
                 });
                 res.send(rewrittenLines.join('\n'));
             });
