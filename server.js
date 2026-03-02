@@ -284,15 +284,20 @@ app.all('/proxy', async (req, res) => {
 
         const headers = {
             'Host': urlObj.host,
-            'User-Agent': userAgent,
+            'User-Agent': 'okhttp/4.12.13',
             'Referer': isJio ? 'https://www.jiocinema.com/' : `${urlObj.protocol}//${urlObj.host}/`,
             'Origin': isJio ? 'https://www.jiocinema.com' : `${urlObj.protocol}//${urlObj.host}`,
             'Accept': '*/*',
             'Accept-Encoding': 'identity',
             'Connection': 'keep-alive',
             'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache'
+            'Pragma': 'no-cache',
+            'X-Forwarded-For': req.ip || req.headers['x-forwarded-for'],
+            'X-Real-IP': req.ip || req.headers['x-forwarded-for'],
+            'X-Forwarded-Proto': req.headers['x-forwarded-proto'] || req.protocol
         };
+
+        console.log(`[Proxy] Routing ${isM3U8 ? 'Manifest' : 'Segment'} (Client IP: ${req.ip} -> Upstream: ${urlObj.host})`);
 
         if (req.headers['content-type']) headers['Content-Type'] = req.headers['content-type'];
         if (req.headers['range']) headers['Range'] = req.headers['range'];
