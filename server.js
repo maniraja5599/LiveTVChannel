@@ -148,6 +148,28 @@ app.get('/api/live/:id', async (req, res) => {
     }
 });
 
+// API: Diagnostics for Railway connectivity
+app.get('/api/diag', async (req, res) => {
+    try {
+        const ipRes = await axios.get('https://api.ipify.org?format=json', { timeout: 5000 });
+        const jioTest = await axios.get('https://jiotvapi.media.jio.com/playback/apis/v1/geturl?langId=6', {
+            validateStatus: () => true,
+            timeout: 5000
+        });
+
+        res.json({
+            server_ip: ipRes.data.ip,
+            jio_api_status: jioTest.status,
+            jio_api_connected: jioTest.status === 405 || jioTest.status === 403 || jioTest.status === 200,
+            node_version: process.version,
+            platform: process.platform,
+            env: process.env.NODE_ENV || 'production'
+        });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // A generic proxy endpoint that fetches the URL and passes headers
 app.all('/proxy', async (req, res) => {
     const streamUrl = req.query.url;
@@ -161,6 +183,9 @@ app.all('/proxy', async (req, res) => {
         const protocol = req.headers['x-forwarded-proto'] || req.protocol;
         const host = req.headers.host;
         const baseUrl = `${protocol}://${host}`;
+
+        // Handling M3U8 Playlist (only for GET)
+        const isM3U8 = req.method === 'GET' && (streamUrl.includes('.m3u8') || streamUrl.includes('.m3u'));
 
         // Forward headers: JioTV requires a specific UA and often tokens in headers
         const isJio = streamUrl.includes('jio') || streamUrl.includes('akamaized.net') || streamUrl.includes('media.jio.com');
@@ -186,19 +211,17 @@ app.all('/proxy', async (req, res) => {
             method: req.method,
             url: streamUrl,
             headers,
-            responseType: 'stream',
+            responseType: isM3U8 ? 'arraybuffer' : 'stream',
             validateStatus: () => true,
-            timeout: 15000,
+            timeout: 20000,
+            decompress: true
         };
 
         if (req.method === 'POST') config.data = req;
 
         const response = await axios(config);
 
-        console.log(`[Proxy] Upstream: ${streamUrl.substring(0, 100)}... Status: ${response.status}`);
-
-        // Handling M3U8 Playlist (only for GET)
-        const isM3U8 = req.method === 'GET' && (streamUrl.includes('.m3u8') || streamUrl.includes('.m3u'));
+        console.log(`[Proxy] Upstream: ${streamUrl.substring(0, 80)}... Status: ${response.status}`);
 
         // Copy over relevant headers
         if (response.headers['content-type']) {
@@ -216,59 +239,42 @@ app.all('/proxy', async (req, res) => {
         }
 
         if (isM3U8) {
-            let playlistData = '';
-            response.data.on('data', (chunk) => { playlistData += chunk.toString(); });
-            response.data.on('end', () => {
-                if (!playlistData || playlistData.trim().length === 0) {
-                    console.error(`[Proxy] Empty response from upstream: ${streamUrl}`);
-                    return res.status(502).send('Upstream returned an empty manifest. The source may be restricted or offline.');
-                }
+            const playlistData = Buffer.from(response.data).toString('utf8');
 
-                if (playlistData.trim().startsWith('<!DOCTYPE') || playlistData.trim().startsWith('<html')) {
-                    console.error(`[Proxy] Upstream returned HTML instead of M3U8: ${streamUrl}`);
-                    return res.status(404).send('Stream source returned an error page.');
-                }
+            if (!playlistData || playlistData.trim().length === 0) {
+                console.error(`[Proxy] Empty response from upstream: ${streamUrl}`);
+                return res.status(502).send('Upstream returned an empty manifest. The source may be restricted.');
+            }
 
-                const lines = playlistData.split('\n');
-                const rewrittenLines = lines.map(line => {
-                    const trimmed = line.trim();
-                    if (!trimmed) return line;
+            if (playlistData.trim().startsWith('<!DOCTYPE') || playlistData.trim().startsWith('<html')) {
+                console.error(`[Proxy] Upstream returned HTML instead of M3U8: ${streamUrl}`);
+                return res.status(404).send('Stream source returned an error page.');
+            }
 
-                    if (trimmed.startsWith('#')) {
-                        // Handle URI attributes in tags like #EXT-X-KEY or #EXT-X-MAP
-                        return line.replace(/URI="([^"]+)"/g, (match, subUrl) => {
-                            try {
-                                const resolvedUrl = new URL(subUrl, streamUrl);
-                                // Persist query params if missing
-                                if (urlObj.search && !resolvedUrl.search) {
-                                    resolvedUrl.search = urlObj.search;
-                                }
-                                return `URI="${baseUrl}/proxy?url=${encodeURIComponent(resolvedUrl.href)}"`;
-                            } catch (e) {
-                                return match;
-                            }
-                        });
-                    } else {
-                        // Handle actual segment/manifest URLs
+            const lines = playlistData.split('\n');
+            const rewrittenLines = lines.map(line => {
+                const trimmed = line.trim();
+                if (!trimmed) return line;
+
+                if (trimmed.startsWith('#')) {
+                    // Handle URI attributes in tags like #EXT-X-KEY or #EXT-X-MAP
+                    return line.replace(/URI="([^"]+)"/g, (match, subUrl) => {
                         try {
-                            const resolvedUrl = new URL(trimmed, streamUrl);
-                            // Persist query params (tokens like __hdnea) from the parent URL if child lacks them
-                            if (urlObj.search && !resolvedUrl.search) {
-                                resolvedUrl.search = urlObj.search;
-                            }
-                            return `${baseUrl}/proxy?url=${encodeURIComponent(resolvedUrl.href)}`;
-                        } catch (e) {
-                            return line;
-                        }
-                    }
-                });
-                res.send(rewrittenLines.join('\n'));
+                            const resolvedUrl = new URL(subUrl, streamUrl);
+                            if (urlObj.search && !resolvedUrl.search) resolvedUrl.search = urlObj.search;
+                            return `URI="${baseUrl}/proxy?url=${encodeURIComponent(resolvedUrl.href)}"`;
+                        } catch (e) { return match; }
+                    });
+                } else {
+                    // Handle actual segment/manifest URLs
+                    try {
+                        const resolvedUrl = new URL(trimmed, streamUrl);
+                        if (urlObj.search && !resolvedUrl.search) resolvedUrl.search = urlObj.search;
+                        return `${baseUrl}/proxy?url=${encodeURIComponent(resolvedUrl.href)}`;
+                    } catch (e) { return line; }
+                }
             });
-            response.data.on('error', (err) => {
-                console.error(`[Proxy] Stream Error: ${err.message}`);
-                if (!res.headersSent) res.status(502).send('Error reading upstream stream');
-            });
-            return;
+            return res.send(rewrittenLines.join('\n'));
         }
 
         res.status(response.status);
@@ -276,7 +282,7 @@ app.all('/proxy', async (req, res) => {
 
     } catch (error) {
         console.error("[Proxy] Critical Error:", error.message);
-        res.status(500).send('Proxy error: ' + error.message);
+        if (!res.headersSent) res.status(500).send('Proxy error: ' + error.message);
     }
 });
 
