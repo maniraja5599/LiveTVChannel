@@ -43,30 +43,29 @@ function node_encrypt(data, keyStr) {
 function getJioCredentials() {
     try {
         const credsFile = path.join(DATA_FOLDER, 'creds.jtv');
+        const keyFile = path.join(DATA_FOLDER, 'credskey.jtv');
+
         if (!fs.existsSync(credsFile)) {
             console.error("Missing credentials file:", credsFile);
             return null;
         }
 
         const eData = fs.readFileSync(credsFile, 'utf8');
-        // Based on investigation, the file is either plain JSON or Base64 of JSON.
-        // PHP's decrypt_data with a string key that starts with letters results in a key of 0.
-        let rawData = eData;
-        try {
-            // Try base64 decode first
-            rawData = Buffer.from(eData, 'base64').toString('utf8');
-            console.log("Attempted Base64 decode for creds.jtv");
-        } catch (e) {
-            console.log("creds.jtv not Base64 encoded, trying as plain text. Error:", e.message);
+        const keyData = fs.existsSync(keyFile) ? fs.readFileSync(keyFile, 'utf8') : "0";
+
+        const key = parseInt(keyData) || 0;
+        const encrypted = Buffer.from(eData, 'base64');
+        let rawData = '';
+        for (let i = 0; i < encrypted.length; i++) {
+            rawData += String.fromCharCode(encrypted[i] - key);
         }
 
-        // If it starts with {, it's JSON
         if (rawData.trim().startsWith('{')) {
             console.log("creds.jtv successfully parsed as JSON.");
             return JSON.parse(rawData);
         }
 
-        console.error("creds.jtv content is not valid JSON after decoding attempt.");
+        console.error("creds.jtv content is not valid JSON after decryption.");
         return null;
     } catch (e) {
         console.error("Error loading Jio credentials:", e);
@@ -246,6 +245,11 @@ app.get('/api/diag', async (req, res) => {
             server_ip: ipRes.data.ip,
             jio_api_status: jioTest.status,
             jio_api_connected: jioTest.status === 405 || jioTest.status === 403 || jioTest.status === 200,
+            session_active: !!getJioCredentials(),
+            session_files: {
+                creds: fs.existsSync(path.join(DATA_FOLDER, 'creds.jtv')),
+                key: fs.existsSync(path.join(DATA_FOLDER, 'credskey.jtv'))
+            },
             node_version: process.version,
             platform: process.platform,
             env: process.env.NODE_ENV || 'production'
