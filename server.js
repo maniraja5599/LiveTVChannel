@@ -14,6 +14,9 @@ app.use(cors({
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Range']
 }));
 
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
 // Trust proxy for correct protocol detection on Railway
 app.set('trust proxy', true);
 
@@ -26,6 +29,16 @@ app.use(express.static(path.join(__dirname, 'dist')));
 
 // --- JioTV Backend Logic ---
 const DATA_FOLDER = path.join(__dirname, 'assets', 'data');
+if (!fs.existsSync(DATA_FOLDER)) fs.mkdirSync(DATA_FOLDER, { recursive: true });
+
+function node_encrypt(data, keyStr) {
+    const key = parseInt(keyStr) || 0;
+    let encrypted = '';
+    for (let i = 0; i < data.length; i++) {
+        encrypted += String.fromCharCode(data.charCodeAt(i) + key);
+    }
+    return Buffer.from(encrypted).toString('base64');
+}
 
 function getJioCredentials() {
     try {
@@ -106,6 +119,78 @@ async function getJioStreamUrl(id) {
         throw new Error("Jio API Error: " + (res.data?.message || "Unknown error"));
     }
 }
+
+// API: Send OTP
+app.post('/api/login/send', async (req, res) => {
+    try {
+        const { mobile } = req.body;
+        if (!mobile || mobile.length !== 10) return res.status(400).json({ error: "Invalid mobile number" });
+
+        const payload = { number: Buffer.from('+91' + mobile).toString('base64') };
+        const response = await axios.post('https://jiotvapi.media.jio.com/userservice/apis/v1/loginotp/send', payload, {
+            headers: {
+                'appname': 'RJIL_JioTV',
+                'os': 'android',
+                'devicetype': 'phone',
+                'Content-Type': 'application/json',
+                'User-Agent': 'okhttp/3.14.9'
+            }
+        });
+
+        if (response.status === 204) {
+            res.json({ status: "success", message: "OTP Sent Successfully" });
+        } else {
+            res.status(response.status).json({ error: response.data?.message || "Failed to send OTP" });
+        }
+    } catch (e) {
+        res.status(500).json({ error: e.response?.data?.message || e.message });
+    }
+});
+
+// API: Verify OTP
+app.post('/api/login/verify', async (req, res) => {
+    try {
+        const { mobile, otp } = req.body;
+        if (!mobile || !otp) return res.status(400).json({ error: "Mobile and OTP are required" });
+
+        const payload = {
+            number: Buffer.from('+91' + mobile).toString('base64'),
+            otp: otp,
+            deviceInfo: {
+                consumptionDeviceName: 'RMX1945',
+                info: {
+                    type: 'android',
+                    platform: { name: 'RMX1945' },
+                    androidId: Math.random().toString(36).substring(2, 18)
+                }
+            }
+        };
+
+        const response = await axios.post('https://jiotvapi.media.jio.com/userservice/apis/v1/loginotp/verify', payload, {
+            headers: {
+                'appname': 'RJIL_JioTV',
+                'os': 'android',
+                'devicetype': 'phone',
+                'Content-Type': 'application/json',
+                'User-Agent': 'okhttp/3.14.9'
+            }
+        });
+
+        if (response.data && response.data.ssoToken) {
+            const u_name = node_encrypt(mobile, "TS-JIOTV");
+            const encryptedCreds = node_encrypt(JSON.stringify(response.data), u_name);
+
+            fs.writeFileSync(path.join(DATA_FOLDER, 'creds.jtv'), encryptedCreds);
+            fs.writeFileSync(path.join(DATA_FOLDER, 'credskey.jtv'), u_name);
+
+            res.json({ status: "success", message: "Logged In Successfully" });
+        } else {
+            res.status(401).json({ error: response.data?.message || "Invalid OTP" });
+        }
+    } catch (e) {
+        res.status(500).json({ error: e.response?.data?.message || e.message });
+    }
+});
 
 // API: Get the Playlist (M3U)
 app.get('/api/playlist', async (req, res) => {

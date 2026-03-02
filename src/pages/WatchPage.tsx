@@ -237,23 +237,40 @@ export function WatchPage() {
                     {/* Cast Button */}
                     <button
                         onClick={async () => {
-                            if (videoRef.current && (videoRef.current as any).remote) {
+                            const proxyUrl = streamUrl?.startsWith('http') && !streamUrl.includes(window.location.host)
+                                ? `${window.location.origin}/proxy?url=${encodeURIComponent(streamUrl)}`
+                                : streamUrl;
+
+                            if (navigator.share) {
                                 try {
-                                    await (videoRef.current as any).remote.prompt();
+                                    await navigator.share({
+                                        title: `Watch ${channelName}`,
+                                        text: `Open this link in your Smart TV's browser or player (VLC/Web Video Caster):`,
+                                        url: proxyUrl || ''
+                                    });
                                 } catch (e) {
-                                    toast.error("Casting not supported in this browser.");
+                                    // User cancelled or error
+                                    if ((e as Error).name !== 'AbortError') {
+                                        toast.error("Failed to share link.");
+                                    }
                                 }
                             } else {
-                                toast.error("Casting is not available.");
+                                // Fallback: Copy to clipboard
+                                try {
+                                    await navigator.clipboard.writeText(proxyUrl || '');
+                                    toast.success("M3U8 Link copied! Paste it in your TV player app.");
+                                } catch (e) {
+                                    toast.error("Could not copy link. Casting not supported.");
+                                }
                             }
                         }}
-                        className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white transition-colors"
+                        className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white transition-all shadow-lg shadow-rose-600/20 font-medium scale-105"
                     >
-                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                             <path d="M2 16.1A5 5 0 0 1 5.9 20M2 12.05A9 9 0 0 1 9.95 20M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6" />
                             <line x1="2" y1="20" x2="2.01" y2="20" />
                         </svg>
-                        <span className="hidden sm:inline">Cast to TV</span>
+                        <span>Cast to TV</span>
                     </button>
 
                     {qualityLevels.length > 0 && (

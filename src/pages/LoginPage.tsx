@@ -22,14 +22,19 @@ export function LoginPage() {
 
         setLoading(true);
         try {
-            // In a real scenario, call: await api.post('/login/sendOTP', { number: phone })
-            // Simulating API call for now
-            await new Promise(res => setTimeout(res, 1000));
+            const res = await fetch('/api/login/send', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mobile: phone })
+            });
+            const data = await res.json();
+
+            if (!res.ok) throw new Error(data.error || 'Failed to send OTP');
 
             toast.success('OTP sent successfully!');
             setStep('otp');
-        } catch (error) {
-            toast.error('Failed to send OTP. Please try again.');
+        } catch (error: any) {
+            toast.error(error.message || 'Failed to send OTP. Please try again.');
         } finally {
             setLoading(false);
         }
@@ -44,15 +49,20 @@ export function LoginPage() {
 
         setLoading(true);
         try {
-            // In a real scenario, call: await api.post('/login/verifyOTP', { number: phone, otp })
-            // Simulating API call for now
-            await new Promise(res => setTimeout(res, 1500));
+            const res = await fetch('/api/login/verify', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mobile: phone, otp })
+            });
+            const data = await res.json();
+
+            if (!res.ok) throw new Error(data.error || 'Invalid OTP');
 
             login(phone);
             toast.success('Login successful!');
             navigate('/');
-        } catch (error) {
-            toast.error('Invalid OTP. Please try again.');
+        } catch (error: any) {
+            toast.error(error.message || 'Invalid OTP. Please try again.');
         } finally {
             setLoading(false);
         }
