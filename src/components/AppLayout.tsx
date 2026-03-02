@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Outlet, useNavigate, useLocation, useOutletContext } from 'react-router-dom';
 import { Search, Settings } from 'lucide-react';
 import { fetchAndParseM3U, type Channel } from '../lib/m3uParser';

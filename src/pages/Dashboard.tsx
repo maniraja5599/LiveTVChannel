@@ -1,5 +1,5 @@
 import { Play, Search, Heart, ChevronUp, ChevronDown, LayoutGrid, List } from 'lucide-react';
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppGlobal } from '../components/AppLayout';
 
