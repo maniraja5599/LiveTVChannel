@@ -127,8 +127,12 @@ app.get('/api/playlist', async (req, res) => {
 app.get('/api/live/:id', async (req, res) => {
     try {
         const streamUrl = await getJioStreamUrl(req.params.id);
-        // We proxy the manifest so we can rewrite relative URLs
-        res.redirect(`/proxy?url=${encodeURIComponent(streamUrl)}`);
+        const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+        const host = req.headers.host;
+        const baseUrl = `${protocol}://${host}`;
+
+        // Use absolute URL for the redirect
+        res.redirect(`${baseUrl}/proxy?url=${encodeURIComponent(streamUrl)}`);
     } catch (e) {
         res.status(500).send("Stream Error: " + e.message);
     }
@@ -144,6 +148,9 @@ app.all('/proxy', async (req, res) => {
 
     try {
         const urlObj = new URL(streamUrl);
+        const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+        const host = req.headers.host;
+        const baseUrl = `${protocol}://${host}`;
 
         // Forward headers: JioTV requires a specific UA and often tokens in headers
         const userAgent = streamUrl.includes('jio')
@@ -191,11 +198,11 @@ app.all('/proxy', async (req, res) => {
                     const trimmed = line.trim();
                     if (trimmed && !trimmed.startsWith('#')) {
                         const resolvedUrl = new URL(trimmed, streamUrl).href;
-                        return `http://localhost:${PORT}/proxy?url=${encodeURIComponent(resolvedUrl)}`;
+                        return `${baseUrl}/proxy?url=${encodeURIComponent(resolvedUrl)}`;
                     }
                     return line.replace(/URI="([^"]+)"/g, (match, subUrl) => {
                         const resolvedUrl = new URL(subUrl, streamUrl).href;
-                        return `URI="http://localhost:${PORT}/proxy?url=${encodeURIComponent(resolvedUrl)}"`;
+                        return `URI="${baseUrl}/proxy?url=${encodeURIComponent(resolvedUrl)}"`;
                     });
                 });
                 res.send(rewrittenLines.join('\n'));
