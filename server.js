@@ -194,6 +194,7 @@ app.all('/proxy', async (req, res) => {
             : (req.headers['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36');
 
         const headers = {
+            'Host': urlObj.host,
             'User-Agent': userAgent,
             'Referer': isJio ? 'https://www.jiocinema.com/' : `${urlObj.protocol}//${urlObj.host}/`,
             'Origin': isJio ? 'https://www.jiocinema.com' : `${urlObj.protocol}//${urlObj.host}`,
@@ -221,7 +222,15 @@ app.all('/proxy', async (req, res) => {
 
         const response = await axios(config);
 
-        console.log(`[Proxy] Upstream: ${streamUrl.substring(0, 80)}... Status: ${response.status}`);
+        console.log(`[Proxy] Upstream Status: ${response.status} | URL: ${streamUrl.substring(0, 80)}...`);
+        console.log(`[Proxy] Upstream Headers:`, JSON.stringify(response.headers));
+
+        // Handle upstream errors
+        if (response.status >= 400 && !isM3U8) {
+            console.error(`[Proxy] Upstream returned error ${response.status} for ${streamUrl}`);
+            res.status(response.status);
+            return response.data.pipe(res);
+        }
 
         // Copy over relevant headers
         if (response.headers['content-type']) {
@@ -242,13 +251,13 @@ app.all('/proxy', async (req, res) => {
             const playlistData = Buffer.from(response.data).toString('utf8');
 
             if (!playlistData || playlistData.trim().length === 0) {
-                console.error(`[Proxy] Empty response from upstream: ${streamUrl}`);
-                return res.status(502).send('Upstream returned an empty manifest. The source may be restricted.');
+                console.error(`[Proxy] Empty response from upstream: ${streamUrl}. Status: ${response.status}`);
+                return res.status(502).send(`Upstream returned an empty manifest (${response.status}). This often means the Railway server IP is blocked or the session is invalid.`);
             }
 
             if (playlistData.trim().startsWith('<!DOCTYPE') || playlistData.trim().startsWith('<html')) {
                 console.error(`[Proxy] Upstream returned HTML instead of M3U8: ${streamUrl}`);
-                return res.status(404).send('Stream source returned an error page.');
+                return res.status(403).send('Stream source returned an error page (Access Denied). Your session may be expired or IP blocked.');
             }
 
             const lines = playlistData.split('\n');
@@ -261,7 +270,15 @@ app.all('/proxy', async (req, res) => {
                     return line.replace(/URI="([^"]+)"/g, (match, subUrl) => {
                         try {
                             const resolvedUrl = new URL(subUrl, streamUrl);
-                            if (urlObj.search && !resolvedUrl.search) resolvedUrl.search = urlObj.search;
+                            // Aggressively persist all query params from master to child
+                            if (urlObj.search) {
+                                const masterParams = new URLSearchParams(urlObj.search);
+                                const childParams = new URLSearchParams(resolvedUrl.search);
+                                for (const [key, value] of masterParams.entries()) {
+                                    if (!childParams.has(key)) childParams.set(key, value);
+                                }
+                                resolvedUrl.search = childParams.toString();
+                            }
                             return `URI="${baseUrl}/proxy?url=${encodeURIComponent(resolvedUrl.href)}"`;
                         } catch (e) { return match; }
                     });
@@ -269,7 +286,15 @@ app.all('/proxy', async (req, res) => {
                     // Handle actual segment/manifest URLs
                     try {
                         const resolvedUrl = new URL(trimmed, streamUrl);
-                        if (urlObj.search && !resolvedUrl.search) resolvedUrl.search = urlObj.search;
+                        // Aggressively persist all query params (tokens like __hdnea)
+                        if (urlObj.search) {
+                            const masterParams = new URLSearchParams(urlObj.search);
+                            const childParams = new URLSearchParams(resolvedUrl.search);
+                            for (const [key, value] of masterParams.entries()) {
+                                if (!childParams.has(key)) childParams.set(key, value);
+                            }
+                            resolvedUrl.search = childParams.toString();
+                        }
                         return `${baseUrl}/proxy?url=${encodeURIComponent(resolvedUrl.href)}`;
                     } catch (e) { return line; }
                 }
@@ -281,8 +306,10 @@ app.all('/proxy', async (req, res) => {
         response.data.pipe(res);
 
     } catch (error) {
-        console.error("[Proxy] Critical Error:", error.message);
-        if (!res.headersSent) res.status(500).send('Proxy error: ' + error.message);
+        console.error("[Proxy] Critical Error:", error.stack);
+        if (!res.headersSent) {
+            res.status(500).send(`Proxy Error: ${error.message}\n\nStack: ${error.stack}\n\nHint: Check if the upstream URL is valid and accessible from this server.`);
+        }
     }
 });
 
